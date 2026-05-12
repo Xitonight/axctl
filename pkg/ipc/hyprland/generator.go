@@ -179,21 +179,26 @@ func formatModifiers(mods []string) string {
 	return strings.Join(mods, " ")
 }
 
-// convertMatchFormat converts "class:^(value)$" to "match:class = value"
-func convertMatchFormat(match string) string {
+func convertMatchFormat(match string, blockSyntax bool) string {
 	if match == "" {
 		return ""
 	}
 	parts := strings.SplitN(match, ":", 2)
 	if len(parts) < 2 {
-		return "match:" + match
+		if blockSyntax {
+			return "match:" + match + " = " + match
+		}
+		return "match:" + match + " " + match
 	}
 	prop := parts[0]
 	value := parts[1]
 	value = strings.TrimPrefix(value, "^")
 	value = strings.TrimSuffix(value, "$")
 	value = strings.Trim(value, "()")
-	return "match:" + prop + " = " + value
+	if blockSyntax {
+		return "match:" + prop + " = " + value
+	}
+	return "match:" + prop + " " + value
 }
 
 func (g *Generator) GenerateKeybinds(config ipc.ConfigKeybinds) string {
@@ -270,7 +275,7 @@ func (g *Generator) GenerateWindowRules(rules []ipc.WindowRule) string {
 			if r.Name != "" {
 				out.WriteString("windowrule {\n")
 				out.WriteString(fmt.Sprintf("    name = %s\n", r.Name))
-				matchStr := convertMatchFormat(r.Match)
+				matchStr := convertMatchFormat(r.Match, true)
 				out.WriteString(fmt.Sprintf("    %s\n", matchStr))
 
 				if r.Float != nil && *r.Float {
@@ -308,51 +313,49 @@ func (g *Generator) GenerateWindowRules(rules []ipc.WindowRule) string {
 				}
 				out.WriteString("}\n\n")
 			} else {
-				// For anonymous rules (no Name), use single-line syntax
-				// Format: windowrule = rule1 = val1, rule2 = val2, match:prop = val
 				var props []string
 
 				if r.Float != nil && *r.Float {
-					props = append(props, "float = on")
+					props = append(props, "float on")
 				}
 				if r.NoBlur != nil && *r.NoBlur {
-					props = append(props, "no_blur = on")
+					props = append(props, "no_blur on")
 				}
 				if r.NoShadow != nil && *r.NoShadow {
-					props = append(props, "no_shadow = on")
+					props = append(props, "no_shadow on")
 				}
 				if r.Rounding != nil {
-					props = append(props, fmt.Sprintf("rounding = %d", *r.Rounding))
+					props = append(props, fmt.Sprintf("rounding %d", *r.Rounding))
 				}
 				if r.BorderSize != nil {
-					props = append(props, fmt.Sprintf("border_size = %d", *r.BorderSize))
+					props = append(props, fmt.Sprintf("border_size %d", *r.BorderSize))
 				}
 				if r.Pin != nil && *r.Pin {
-					props = append(props, "pin = on")
+					props = append(props, "pin on")
 				}
 				if r.Fullscreen != nil && *r.Fullscreen {
-					props = append(props, "fullscreen = on")
+					props = append(props, "fullscreen on")
 				}
 				if r.IdleInhibit != nil && *r.IdleInhibit {
-					props = append(props, "idle_inhibit = on")
+					props = append(props, "idle_inhibit on")
 				}
 				if r.NoScreenShare != nil && *r.NoScreenShare {
-					props = append(props, "no_screen_share = on")
+					props = append(props, "no_screen_share on")
 				}
 				if r.Move != nil && *r.Move != "" {
-					props = append(props, fmt.Sprintf("move = %s", *r.Move))
+					props = append(props, fmt.Sprintf("move %s", *r.Move))
 				}
 				if r.Size != nil && *r.Size != "" {
-					props = append(props, fmt.Sprintf("size = %s", *r.Size))
+					props = append(props, fmt.Sprintf("size %s", *r.Size))
 				}
 
-				matchStr := convertMatchFormat(r.Match)
+				matchStr := convertMatchFormat(r.Match, false)
 				props = append(props, matchStr)
 
 				out.WriteString("windowrule = " + strings.Join(props, ", ") + "\n\n")
 			}
 		} else if r.Match != "" && r.Rule != "" {
-			out.WriteString(fmt.Sprintf("windowrulev2 = %s, %s\n", r.Rule, r.Match))
+			out.WriteString(fmt.Sprintf("windowrule = %s, %s\n", r.Rule, r.Match))
 		}
 	}
 
@@ -369,33 +372,30 @@ func (g *Generator) GenerateLayerRules(rules []ipc.LayerRule) string {
 			continue
 		}
 
-		// Use single-line syntax for layer rules (no Name field exists)
-		// Format: layerrule = rule1 = val1, rule2 = val2, match:namespace = value
 		var props []string
 
 		if r.NoAnim != nil && *r.NoAnim {
-			props = append(props, "no_anim = on")
+			props = append(props, "no_anim on")
 		}
 		if r.Blur != nil && *r.Blur {
-			props = append(props, "blur = on")
+			props = append(props, "blur on")
 		}
 		if r.BlurPopups != nil && *r.BlurPopups {
-			props = append(props, "blur_popups = on")
-		}
-		if r.IgnoreAlpha != nil && *r.IgnoreAlpha {
-			props = append(props, "ignore_alpha = on")
-		}
-		if r.IgnoreZeroAlpha != nil && *r.IgnoreZeroAlpha {
-			props = append(props, "ignore_zero_alpha = on")
-		}
-		if r.NoShadow != nil && *r.NoShadow {
-			props = append(props, "no_shadow = on")
+			props = append(props, "blur_popups on")
 		}
 		if r.IgnoreAlphaValue != nil {
-			props = append(props, fmt.Sprintf("ignore_alpha = %.2f", *r.IgnoreAlphaValue))
+			props = append(props, fmt.Sprintf("ignore_alpha %.2f", *r.IgnoreAlphaValue))
+		} else if r.IgnoreAlpha != nil && *r.IgnoreAlpha {
+			props = append(props, "ignore_alpha 0")
+		}
+		if r.IgnoreZeroAlpha != nil && *r.IgnoreZeroAlpha {
+			props = append(props, "ignore_zero_alpha on")
+		}
+		if r.NoShadow != nil && *r.NoShadow {
+			props = append(props, "no_shadow on")
 		}
 
-		matchStr := fmt.Sprintf("match:namespace = %s", r.Namespace)
+		matchStr := fmt.Sprintf("match:namespace %s", r.Namespace)
 		props = append(props, matchStr)
 
 		out.WriteString("layerrule = " + strings.Join(props, ", ") + "\n\n")

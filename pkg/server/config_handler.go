@@ -14,6 +14,7 @@ import (
 type ConfigHandler struct {
 	compositor ipc.Compositor
 	generator  ipc.ConfigGenerator
+	luaGen     ipc.LuaConfigGenerator
 	outputPath string
 }
 
@@ -23,9 +24,11 @@ func NewConfigHandler(c ipc.Compositor) *ConfigHandler {
 
 func NewConfigHandlerWithOutput(c ipc.Compositor, outputPath string) *ConfigHandler {
 	var gen ipc.ConfigGenerator
+	var lg ipc.LuaConfigGenerator
 	switch c.(type) {
 	case *hyprland.Hyprland:
 		gen = &hyprland.Generator{}
+		lg = &hyprland.LuaGenerator{}
 	case *niri.Niri:
 		gen = &niri.Generator{}
 	case *mango.Mango:
@@ -39,7 +42,7 @@ func NewConfigHandlerWithOutput(c ipc.Compositor, outputPath string) *ConfigHand
 		resolvedPath = DefaultOutputPath()
 	}
 
-	return &ConfigHandler{compositor: c, generator: gen, outputPath: resolvedPath}
+	return &ConfigHandler{compositor: c, generator: gen, luaGen: lg, outputPath: resolvedPath}
 }
 
 func DefaultOutputPath() string {
@@ -77,24 +80,50 @@ func (h *ConfigHandler) ApplyConfig(payload ipc.ConfigUniversal) error {
 	fullConfig.WriteString("\n")
 	fullConfig.WriteString(layerStr)
 
-	// Write to file
+	// Write .conf file
 	configPath := h.outputPath
 	if configPath == "" {
 		configPath = DefaultOutputPath()
 	}
 
-	// Create parent directories if they don't exist
 	dir := filepath.Dir(configPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create directory %s: %w", dir, err)
 	}
 
-	// Write the config file (overwrite existing)
 	if err := os.WriteFile(configPath, []byte(fullConfig.String()), 0644); err != nil {
 		return fmt.Errorf("failed to write config to %s: %w", configPath, err)
 	}
-
 	fmt.Printf("Config written to: %s\n", configPath)
+
+	// Write .lua file if Lua generator is available
+	if h.luaGen != nil {
+		luaStartup := h.luaGen.GenerateStartupLua(payload.Exec, payload.ExecOnce)
+		luaApp := h.luaGen.GenerateAppearanceLua(payload.Appearance)
+		luaBinds := h.luaGen.GenerateKeybindsLua(payload.Keybinds)
+		luaRules := h.luaGen.GenerateWindowRulesLua(payload.WindowRules)
+		luaLayers := h.luaGen.GenerateLayerRulesLua(payload.LayerRules)
+
+		var luaConfig strings.Builder
+		if luaStartup != "" {
+			luaConfig.WriteString(luaStartup)
+			luaConfig.WriteString("\n")
+		}
+		luaConfig.WriteString(luaApp)
+		luaConfig.WriteString("\n")
+		luaConfig.WriteString(luaBinds)
+		luaConfig.WriteString("\n")
+		luaConfig.WriteString(luaRules)
+		luaConfig.WriteString("\n")
+		luaConfig.WriteString(luaLayers)
+
+		luaPath := strings.TrimSuffix(configPath, ".conf") + ".lua"
+		if err := os.WriteFile(luaPath, []byte(luaConfig.String()), 0644); err != nil {
+			return fmt.Errorf("failed to write Lua config to %s: %w", luaPath, err)
+		}
+		fmt.Printf("Lua config written to: %s\n", luaPath)
+	}
+
 	fmt.Printf("Generated Appearance:\n%s\n", appStr)
 	fmt.Printf("Generated Keybinds:\n%s\n", bindStr)
 	fmt.Printf("Generated Window Rules:\n%s\n", rulesStr)

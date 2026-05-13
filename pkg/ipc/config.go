@@ -175,7 +175,7 @@ type ConfigUniversal struct {
 	ExecOnce    []string         `json:"exec_once,omitempty"`
 }
 
-// ConfigGenerator transforms a universal configuration into a compositor-specific syntax
+// ConfigGenerator transforms a universal configuration into compositor-specific hyprlang syntax
 type ConfigGenerator interface {
 	// GenerateAppearance outputs the configuration string for layout, colors, and decorations
 	GenerateAppearance(config ConfigAppearance) string
@@ -188,4 +188,13 @@ type ConfigGenerator interface {
 	// GenerateLayerRules outputs the layer rule declarations
 	GenerateLayerRules(rules []LayerRule) string
 	GenerateStartup(exec []string, execOnce []string) string
+}
+
+// LuaConfigGenerator transforms a universal configuration into Hyprland Lua syntax
+type LuaConfigGenerator interface {
+	GenerateAppearanceLua(config ConfigAppearance) string
+	GenerateKeybindsLua(config ConfigKeybinds) string
+	GenerateWindowRulesLua(rules []WindowRule) string
+	GenerateLayerRulesLua(rules []LayerRule) string
+	GenerateStartupLua(exec []string, execOnce []string) string
 }

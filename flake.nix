@@ -21,13 +21,13 @@
         {
           default = pkgs.buildGoModule {
             pname = "axctl";
-            version = "0.0.14";
+            version = "0.0.15";
             src = self;
             go = pkgs.go;
             subPackages = [ "." ];
             ldflags = [
               "-X"
-              "main.Version=0.0.14"
+              "main.Version=0.0.15"
             ];
             vendorHash = "sha256-4PUs37IRhUPtuXi4KU8wOUErIkVlcnaoj94zBDBsMdk=";
           };

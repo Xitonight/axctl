@@ -45,16 +45,23 @@ func (g *LuaGenerator) GenerateAppearanceLua(config ipc.ConfigAppearance) string
 			if config.Border.Width != nil {
 				b.WriteString(fmt.Sprintf("        border_size = %d,\n", *config.Border.Width))
 			}
-			if config.Border.ActiveColor != nil {
-				colors, angle := parseColorString(*config.Border.ActiveColor)
-				if colors != "" {
-					if angle != "" {
-						b.WriteString(fmt.Sprintf("        col = { active_border = { colors = {%s}, angle = %s } },\n", colors, angle))
-					} else {
-						b.WriteString(fmt.Sprintf("        col = { active_border = \"%s\" },\n", colors))
+if config.Border.ActiveColor != nil {
+			colors, angle := parseColorString(*config.Border.ActiveColor)
+			if colors != "" {
+				if angle != "" {
+					angleNum := strings.TrimSuffix(angle, "deg")
+					colorParts := strings.Fields(colors)
+					quoted := make([]string, len(colorParts))
+					for i, cp := range colorParts {
+						quoted[i] = fmt.Sprintf("%q", cp)
 					}
+					colorList := strings.Join(quoted, ", ")
+					b.WriteString(fmt.Sprintf("        col = { active_border = { colors = {%s}, angle = %s } },\n", colorList, angleNum))
+				} else {
+					b.WriteString(fmt.Sprintf("        col = { active_border = \"%s\" },\n", colors))
 				}
 			}
+		}
 			if config.Border.InactiveColor != nil {
 				colors, _ := parseColorString(*config.Border.InactiveColor)
 				if colors != "" {
@@ -93,7 +100,7 @@ func (g *LuaGenerator) GenerateAppearanceLua(config ipc.ConfigAppearance) string
 			if config.Shadow.Color != nil {
 				colorStr, _ := parseColorString(*config.Shadow.Color)
 				if colorStr != "" {
-					b.WriteString(fmt.Sprintf("            color = %s,\n", colorStr))
+					b.WriteString(fmt.Sprintf("            color = \"%s\",\n", colorStr))
 				}
 			}
 			b.WriteString("        },\n")
@@ -248,8 +255,15 @@ func dispatcherToLua(dispatcher, arg string) string {
 		dir := arg
 		return fmt.Sprintf("hl.dsp.focus({ direction = %q })", dir)
 	case "movewindow":
-		dir := arg
-		return fmt.Sprintf("hl.dsp.window.move({ direction = %q })", dir)
+		if arg == "" {
+			return "hl.dsp.window.drag()"
+		}
+		return fmt.Sprintf("hl.dsp.window.move({ direction = %q })", arg)
+	case "resizewindow":
+		if arg == "" {
+			return "hl.dsp.window.resize()"
+		}
+		return fmt.Sprintf("hl.dsp.window.resize({ %s })", arg)
 	case "movetoworkspace":
 		return fmt.Sprintf("hl.dsp.window.move({ workspace = %q })", arg)
 	case "movetoworkspacesilent":

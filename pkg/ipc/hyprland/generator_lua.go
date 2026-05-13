@@ -255,7 +255,8 @@ func dispatcherToLua(dispatcher, arg string) string {
 	case "movetoworkspacesilent":
 		return fmt.Sprintf("hl.dsp.window.move({ workspace = %q })", arg)
 	case "workspace":
-		return fmt.Sprintf("hl.dsp.focus({ workspace = %s })", arg)
+		// Workspace args like e-1, e+1, +1, -1 must be strings in Lua
+		return fmt.Sprintf("hl.dsp.focus({ workspace = %q })", arg)
 	case "togglespecialworkspace":
 		return fmt.Sprintf("hl.dsp.workspace.toggle_special(%q)", arg)
 	case "pin":
@@ -333,9 +334,9 @@ func (g *LuaGenerator) GenerateWindowRulesLua(rules []ipc.WindowRule) string {
 		if r.Fullscreen != nil && *r.Fullscreen {
 			b.WriteString("    fullscreen = true,\n")
 		}
-		if r.IdleInhibit != nil && *r.IdleInhibit {
-			b.WriteString("    idle_inhibit = true,\n")
-		}
+if r.IdleInhibit != nil && *r.IdleInhibit {
+		b.WriteString("    idle_inhibit = \"always\",\n")
+	}
 		if r.NoScreenShare != nil && *r.NoScreenShare {
 			b.WriteString("    no_screen_share = true,\n")
 		}

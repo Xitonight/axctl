@@ -45,28 +45,34 @@ func (g *LuaGenerator) GenerateAppearanceLua(config ipc.ConfigAppearance) string
 			if config.Border.Width != nil {
 				b.WriteString(fmt.Sprintf("        border_size = %d,\n", *config.Border.Width))
 			}
-if config.Border.ActiveColor != nil {
-			colors, angle := parseColorString(*config.Border.ActiveColor)
-			if colors != "" {
-				if angle != "" {
-					angleNum := strings.TrimSuffix(angle, "deg")
-					colorParts := strings.Fields(colors)
-					quoted := make([]string, len(colorParts))
-					for i, cp := range colorParts {
-						quoted[i] = fmt.Sprintf("%q", cp)
+			hasActive := config.Border.ActiveColor != nil
+			hasInactive := config.Border.InactiveColor != nil
+			if hasActive || hasInactive {
+				b.WriteString("        col = {\n")
+				if hasActive {
+					colors, angle := parseColorString(*config.Border.ActiveColor)
+					if colors != "" {
+						if angle != "" {
+							angleNum := strings.TrimSuffix(angle, "deg")
+							colorParts := strings.Fields(colors)
+							quoted := make([]string, len(colorParts))
+							for i, cp := range colorParts {
+								quoted[i] = fmt.Sprintf("%q", cp)
+							}
+							colorList := strings.Join(quoted, ", ")
+							b.WriteString(fmt.Sprintf("            active_border = { colors = {%s}, angle = %s },\n", colorList, angleNum))
+						} else {
+							b.WriteString(fmt.Sprintf("            active_border = \"%s\",\n", colors))
+						}
 					}
-					colorList := strings.Join(quoted, ", ")
-					b.WriteString(fmt.Sprintf("        col = { active_border = { colors = {%s}, angle = %s } },\n", colorList, angleNum))
-				} else {
-					b.WriteString(fmt.Sprintf("        col = { active_border = \"%s\" },\n", colors))
 				}
-			}
-		}
-			if config.Border.InactiveColor != nil {
-				colors, _ := parseColorString(*config.Border.InactiveColor)
-				if colors != "" {
-					b.WriteString(fmt.Sprintf("        col = { inactive_border = \"%s\" },\n", strings.TrimSuffix(colors, " ")))
+				if hasInactive {
+					colors, _ := parseColorString(*config.Border.InactiveColor)
+					if colors != "" {
+						b.WriteString(fmt.Sprintf("            inactive_border = \"%s\",\n", strings.TrimSuffix(colors, " ")))
+					}
 				}
+				b.WriteString("        },\n")
 			}
 		}
 		if config.Layout != nil && *config.Layout != "" {

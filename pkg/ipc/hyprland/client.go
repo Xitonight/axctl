@@ -50,7 +50,12 @@ func (h *Hyprland) dispatch(cmd string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return string(response), nil
+	resp := string(response)
+	trimmed := strings.TrimSpace(resp)
+	if strings.HasPrefix(trimmed, "error:") || trimmed == "unknown request" {
+		return resp, fmt.Errorf("hyprland rejected request: %s", trimmed)
+	}
+	return resp, nil
 }
 
 func (h *Hyprland) ListWindows() ([]ipc.Window, error) {
@@ -295,7 +300,7 @@ func (h *Hyprland) ActiveWorkspace() (*ipc.Workspace, error) {
 }
 
 func (h *Hyprland) SwitchWorkspace(id string) error {
-	_, err := h.dispatch(fmt.Sprintf("dispatch workspace %s", id))
+	_, err := h.dispatch(fmt.Sprintf("dispatch hl.dsp.focus({ workspace = %q })", id))
 	return err
 }
 
@@ -407,7 +412,7 @@ func (h *Hyprland) MoveToWorkspaceSilent(windowID, workspaceID string) error {
 }
 
 func (h *Hyprland) ToggleSpecialWorkspace(name string) error {
-	_, err := h.dispatch(fmt.Sprintf("dispatch togglespecialworkspace %s", name))
+	_, err := h.dispatch(fmt.Sprintf("dispatch hl.dsp.workspace.toggle_special(%q)", name))
 	return err
 }
 

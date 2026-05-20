@@ -242,6 +242,20 @@ func bindFlagsToLua(flags string) string {
 	return strings.Join(parts, ", ")
 }
 
+func isScrollingLayoutMsg(arg string) bool {
+	prefixes := []string{"focus ", "movewindowto ", "colresize", "promote", "togglefit", "swapcol ", "movecoltoworkspace"}
+	for _, p := range prefixes {
+		if strings.HasPrefix(arg, p) {
+			return true
+		}
+	}
+	return false
+}
+
+func isDwindleLayoutMsg(arg string) bool {
+	return arg == "rotatesplit" || arg == "togglesplit"
+}
+
 func dispatcherToLua(dispatcher, arg string) string {
 	switch dispatcher {
 	case "killactive":
@@ -258,8 +272,9 @@ func dispatcherToLua(dispatcher, arg string) string {
 		}
 		return "hl.dsp.window.fullscreen()"
 	case "movefocus":
-		dir := arg
-		return fmt.Sprintf("hl.dsp.focus({ direction = %q })", dir)
+		return fmt.Sprintf(
+			"function() if hl.get_active_workspace().tiled_layout == \"scrolling\" then hl.dispatch(hl.dsp.layout(%q)) else hl.dispatch(hl.dsp.focus({ direction = %q })) end end",
+			"focus "+arg, arg)
 	case "movewindow":
 		if arg == "" {
 			return "hl.dsp.window.drag()"
@@ -275,7 +290,6 @@ func dispatcherToLua(dispatcher, arg string) string {
 	case "movetoworkspacesilent":
 		return fmt.Sprintf("hl.dsp.window.move({ workspace = %q })", arg)
 	case "workspace":
-		// Workspace args like e-1, e+1, +1, -1 must be strings in Lua
 		return fmt.Sprintf("hl.dsp.focus({ workspace = %q })", arg)
 	case "togglespecialworkspace":
 		return fmt.Sprintf("hl.dsp.workspace.toggle_special(%q)", arg)
@@ -296,6 +310,14 @@ func dispatcherToLua(dispatcher, arg string) string {
 	case "dpms":
 		return fmt.Sprintf("hl.dsp.dpms({ action = %q })", arg)
 	case "layoutmsg":
+		if isScrollingLayoutMsg(arg) {
+			return fmt.Sprintf(
+				"function() if hl.get_active_workspace().tiled_layout == \"scrolling\" then hl.dispatch(hl.dsp.layout(%q)) end end", arg)
+		}
+		if isDwindleLayoutMsg(arg) {
+			return fmt.Sprintf(
+				"function() if hl.get_active_workspace().tiled_layout == \"dwindle\" then hl.dispatch(hl.dsp.layout(%q)) end end", arg)
+		}
 		return fmt.Sprintf("hl.dsp.layout(%q)", arg)
 	case "resizewindowpixel":
 		return fmt.Sprintf("hl.dsp.window.resize({ %s })", arg)
@@ -354,9 +376,9 @@ func (g *LuaGenerator) GenerateWindowRulesLua(rules []ipc.WindowRule) string {
 		if r.Fullscreen != nil && *r.Fullscreen {
 			b.WriteString("    fullscreen = true,\n")
 		}
-if r.IdleInhibit != nil && *r.IdleInhibit {
-		b.WriteString("    idle_inhibit = \"always\",\n")
-	}
+		if r.IdleInhibit != nil && *r.IdleInhibit {
+			b.WriteString("    idle_inhibit = \"always\",\n")
+		}
 		if r.NoScreenShare != nil && *r.NoScreenShare {
 			b.WriteString("    no_screen_share = true,\n")
 		}

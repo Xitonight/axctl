@@ -266,9 +266,9 @@ func dispatcherToLua(dispatcher, arg string) string {
 		return "hl.dsp.window.float({ action = \"toggle\" })"
 	case "fullscreen":
 		if arg == "1" {
-			return "hl.dsp.window.fullscreen({ action = \"on\" })"
+			return "hl.dsp.window.fullscreen({ action = \"set\" })"
 		} else if arg == "0" {
-			return "hl.dsp.window.fullscreen({ action = \"off\" })"
+			return "hl.dsp.window.fullscreen({ action = \"unset\" })"
 		}
 		return "hl.dsp.window.fullscreen()"
 	case "movefocus":

@@ -466,10 +466,7 @@ func (h *Hyprland) ActiveWorkspace() (*ipc.Workspace, error) {
 }
 
 func (h *Hyprland) SwitchWorkspace(id string) error {
-	_, err := h.dispatchVersioned(
-		fmt.Sprintf("workspace %s", id),
-		fmt.Sprintf("hl.dsp.focus({ workspace = %q })", id),
-	)
+	_, err := h.dispatch(fmt.Sprintf("dispatch workspace %s", id))
 	return err
 }
 
@@ -590,10 +587,11 @@ func (h *Hyprland) MoveToWorkspaceSilent(windowID, workspaceID string) error {
 }
 
 func (h *Hyprland) ToggleSpecialWorkspace(name string) error {
-	_, err := h.dispatchVersioned(
-		fmt.Sprintf("togglespecialworkspace %s", name),
-		fmt.Sprintf("hl.dsp.workspace.toggle_special(%q)", name),
-	)
+	if name == "" {
+		_, err := h.dispatch("dispatch togglespecialworkspace")
+		return err
+	}
+	_, err := h.dispatch(fmt.Sprintf("dispatch togglespecialworkspace %s", name))
 	return err
 }
 

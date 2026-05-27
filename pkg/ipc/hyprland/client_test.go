@@ -83,7 +83,8 @@ func TestHyprlandLegacyDispatcherCommands(t *testing.T) {
 		want string
 	}{
 		{name: "move window keeps shorthand direction", run: func(h *Hyprland) error { return h.MoveWindow("0x1", "l") }, want: "dispatch movewindow l,address:0x1"},
-		{name: "switch workspace", run: func(h *Hyprland) error { return h.SwitchWorkspace("2") }, want: "dispatch workspace 2"},
+		{name: "switch workspace", run: func(h *Hyprland) error { return h.SwitchWorkspace("+1") }, want: "dispatch workspace +1"},
+		{name: "toggle special workspace", run: func(h *Hyprland) error { return h.ToggleSpecialWorkspace("") }, want: "dispatch togglespecialworkspace"},
 		{name: "execute", run: func(h *Hyprland) error { return h.Execute("kitty --class demo") }, want: "dispatch exec kitty --class demo"},
 	}
 
@@ -113,7 +114,11 @@ func TestHyprlandLuaDispatcherCommands(t *testing.T) {
 		{name: "focus direction normalizes shorthand", run: func(h *Hyprland) error { return h.FocusDir("l") }, want: `dispatch hl.dsp.focus({ direction = "left" })`},
 		{name: "move window normalizes shorthand and targets window", run: func(h *Hyprland) error { return h.MoveWindow("0x1", "r") }, want: `dispatch hl.dsp.window.move({ direction = "right", window = "address:0x1" })`},
 		{name: "resize window targets window", run: func(h *Hyprland) error { return h.ResizeWindow("0x1", 800, 600) }, want: `dispatch hl.dsp.window.resize({ x = 800, y = 600, window = "address:0x1" })`},
+		{name: "switch workspace quotes relative target", run: func(h *Hyprland) error { return h.SwitchWorkspace("+1") }, want: `dispatch hl.dsp.focus({ workspace = "+1" })`},
+		{name: "switch workspace quotes relative reverse target", run: func(h *Hyprland) error { return h.SwitchWorkspace("-1") }, want: `dispatch hl.dsp.focus({ workspace = "-1" })`},
 		{name: "move workspace silent uses follow false", run: func(h *Hyprland) error { return h.MoveToWorkspaceSilent("0x1", "3") }, want: `dispatch hl.dsp.window.move({ workspace = "3", follow = false, window = "address:0x1" })`},
+		{name: "toggle special workspace uses dispatcher object", run: func(h *Hyprland) error { return h.ToggleSpecialWorkspace("") }, want: "dispatch hl.dsp.workspace.toggle_special()"},
+		{name: "toggle named special workspace quotes name", run: func(h *Hyprland) error { return h.ToggleSpecialWorkspace("magic") }, want: `dispatch hl.dsp.workspace.toggle_special("magic")`},
 		{name: "dpms monitor", run: func(h *Hyprland) error { return h.SetDpms("DP-1", false) }, want: `dispatch hl.dsp.dpms({ action = "off", monitor = "DP-1" })`},
 		{name: "close active window", run: func(h *Hyprland) error { return h.CloseWindow("") }, want: "dispatch hl.dsp.window.close()"},
 		{name: "set maximized uses set action", run: func(h *Hyprland) error { return h.SetMaximized("", true) }, want: `dispatch hl.dsp.window.fullscreen({ mode = "maximized", action = "set" })`},

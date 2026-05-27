@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -15,8 +16,11 @@ import (
 )
 
 type Hyprland struct {
-	signature string
-	mu        sync.Mutex
+	signature      string
+	mu             sync.Mutex
+	versionMu      sync.Mutex
+	versionKnown   bool
+	useLuaDispatch bool
 }
 
 func New() (*Hyprland, error) {
@@ -56,6 +60,141 @@ func (h *Hyprland) dispatch(cmd string) (string, error) {
 		return resp, fmt.Errorf("hyprland rejected request: %s", trimmed)
 	}
 	return resp, nil
+}
+
+func (h *Hyprland) supportsLuaDispatchers() bool {
+	h.versionMu.Lock()
+	if h.versionKnown {
+		useLuaDispatch := h.useLuaDispatch
+		h.versionMu.Unlock()
+		return useLuaDispatch
+	}
+	h.versionMu.Unlock()
+
+	resp, err := h.dispatch("j/version")
+	if err != nil {
+		return false
+	}
+
+	version, err := parseHyprlandVersion(resp)
+	if err != nil {
+		return false
+	}
+
+	useLuaDispatch := isHyprlandVersionAtLeast(version, 0, 55)
+	h.versionMu.Lock()
+	h.useLuaDispatch = useLuaDispatch
+	h.versionKnown = true
+	h.versionMu.Unlock()
+	return useLuaDispatch
+}
+
+func (h *Hyprland) dispatchVersioned(legacy, lua string) (string, error) {
+	if h.supportsLuaDispatchers() {
+		return h.dispatch("dispatch " + lua)
+	}
+	return h.dispatch("dispatch " + legacy)
+}
+
+func parseHyprlandVersion(resp string) (string, error) {
+	trimmed := strings.TrimSpace(resp)
+	if strings.HasPrefix(trimmed, "{") {
+		var data struct {
+			Version string `json:"version"`
+			Tag     string `json:"tag"`
+		}
+		if err := json.Unmarshal([]byte(trimmed), &data); err != nil {
+			return "", err
+		}
+		if data.Version != "" {
+			return data.Version, nil
+		}
+		if data.Tag != "" {
+			return data.Tag, nil
+		}
+		return "", fmt.Errorf("hyprland version response did not include version")
+	}
+
+	fields := strings.Fields(trimmed)
+	for _, field := range fields {
+		field = strings.TrimPrefix(field, "v")
+		if _, err := parseVersionNumber(field); err == nil {
+			return field, nil
+		}
+	}
+	return "", fmt.Errorf("could not parse hyprland version from %q", trimmed)
+}
+
+func isHyprlandVersionAtLeast(version string, major, minor int) bool {
+	parsed, err := parseVersionNumber(version)
+	if err != nil {
+		return false
+	}
+	if parsed.major != major {
+		return parsed.major > major
+	}
+	return parsed.minor >= minor
+}
+
+type versionNumber struct {
+	major int
+	minor int
+}
+
+func parseVersionNumber(version string) (versionNumber, error) {
+	clean := strings.TrimPrefix(strings.TrimSpace(version), "v")
+	parts := strings.Split(clean, ".")
+	if len(parts) < 2 {
+		return versionNumber{}, fmt.Errorf("invalid version %q", version)
+	}
+
+	major, err := strconv.Atoi(versionDigits(parts[0]))
+	if err != nil {
+		return versionNumber{}, err
+	}
+	minor, err := strconv.Atoi(versionDigits(parts[1]))
+	if err != nil {
+		return versionNumber{}, err
+	}
+	return versionNumber{major: major, minor: minor}, nil
+}
+
+func versionDigits(value string) string {
+	for i, r := range value {
+		if r < '0' || r > '9' {
+			return value[:i]
+		}
+	}
+	return value
+}
+
+func hyprTarget(id string) string {
+	if id == "" {
+		return ""
+	}
+	return "address:" + id
+}
+
+func luaTargetField(id string) string {
+	if id == "" {
+		return ""
+	}
+	return fmt.Sprintf(", window = %q", hyprTarget(id))
+}
+
+func luaDirection(direction string) string {
+	switch direction {
+	case "l":
+		return "left"
+	case "r":
+		return "right"
+	case "u":
+		return "up"
+	case "d":
+		return "down"
+	default:
+		return direction
+	}
 }
 
 func (h *Hyprland) ListWindows() ([]ipc.Window, error) {
@@ -127,48 +266,58 @@ func (h *Hyprland) ActiveWindow() (string, error) {
 }
 
 func (h *Hyprland) FocusWindow(id string) error {
-	_, err := h.dispatch(fmt.Sprintf("dispatch focuswindow address:%s", id))
+	_, err := h.dispatchVersioned(
+		fmt.Sprintf("focuswindow %s", hyprTarget(id)),
+		fmt.Sprintf("hl.dsp.focus({ window = %q })", hyprTarget(id)),
+	)
 	return err
 }
 
 func (h *Hyprland) FocusDir(direction string) error {
-	_, err := h.dispatch(fmt.Sprintf("dispatch movefocus %s", direction))
+	_, err := h.dispatchVersioned(
+		fmt.Sprintf("movefocus %s", direction),
+		fmt.Sprintf("hl.dsp.focus({ direction = %q })", luaDirection(direction)),
+	)
 	return err
 }
 
 func (h *Hyprland) CloseWindow(id string) error {
-	target := "address:" + id
-	if id == "" {
-		target = ""
+	target := hyprTarget(id)
+	lua := "hl.dsp.window.close()"
+	if target != "" {
+		lua = fmt.Sprintf("hl.dsp.window.close({ window = %q })", target)
 	}
-	_, err := h.dispatch(fmt.Sprintf("dispatch closewindow %s", target))
+	_, err := h.dispatchVersioned(fmt.Sprintf("closewindow %s", target), lua)
 	return err
 }
 
 func (h *Hyprland) MoveWindow(id string, direction string) error {
 	arg := direction
 	if id != "" {
-		arg = direction + ",address:" + id
+		arg = direction + "," + hyprTarget(id)
 	}
-	_, err := h.dispatch(fmt.Sprintf("dispatch movewindow %s", arg))
+	_, err := h.dispatchVersioned(
+		fmt.Sprintf("movewindow %s", arg),
+		fmt.Sprintf("hl.dsp.window.move({ direction = %q%s })", luaDirection(direction), luaTargetField(id)),
+	)
 	return err
 }
 
 func (h *Hyprland) ResizeWindow(id string, width, height int) error {
-	target := "address:" + id
-	if id == "" {
-		target = ""
-	}
-	_, err := h.dispatch(fmt.Sprintf("dispatch resizewindowpixel exact %d %d,%s", width, height, target))
+	target := hyprTarget(id)
+	_, err := h.dispatchVersioned(
+		fmt.Sprintf("resizewindowpixel exact %d %d,%s", width, height, target),
+		fmt.Sprintf("hl.dsp.window.resize({ x = %d, y = %d%s })", width, height, luaTargetField(id)),
+	)
 	return err
 }
 
 func (h *Hyprland) ToggleFloating(id string) error {
-	target := "address:" + id
-	if id == "" {
-		target = ""
-	}
-	_, err := h.dispatch(fmt.Sprintf("dispatch togglefloating %s", target))
+	target := hyprTarget(id)
+	_, err := h.dispatchVersioned(
+		fmt.Sprintf("togglefloating %s", target),
+		fmt.Sprintf("hl.dsp.window.float({ action = \"toggle\"%s })", luaTargetField(id)),
+	)
 	return err
 }
 
@@ -192,7 +341,10 @@ func (h *Hyprland) SetFullscreen(id string, state bool) error {
 	}
 
 	if isFs != state {
-		_, err := h.dispatch("dispatch fullscreen 0")
+		_, err := h.dispatchVersioned(
+			"fullscreen 0",
+			"hl.dsp.window.fullscreen({ mode = \"fullscreen\", action = \"toggle\" })",
+		)
 		return err
 	}
 	return nil
@@ -203,21 +355,28 @@ func (h *Hyprland) SetMaximized(id string, state bool) error {
 	if state {
 		val = "1"
 	}
-	_, err := h.dispatch(fmt.Sprintf("dispatch fullscreen %s", val))
+	action := "unset"
+	if state {
+		action = "set"
+	}
+	_, err := h.dispatchVersioned(
+		fmt.Sprintf("fullscreen %s", val),
+		fmt.Sprintf("hl.dsp.window.fullscreen({ mode = \"maximized\", action = %q })", action),
+	)
 	return err
 }
 
 func (h *Hyprland) PinWindow(id string, state bool) error {
-	target := "address:" + id
-	if id == "" {
-		target = ""
-	}
-	_, err := h.dispatch(fmt.Sprintf("dispatch pin %s", target))
+	target := hyprTarget(id)
+	_, err := h.dispatchVersioned(
+		fmt.Sprintf("pin %s", target),
+		fmt.Sprintf("hl.dsp.window.pin({ action = \"toggle\"%s })", luaTargetField(id)),
+	)
 	return err
 }
 
 func (h *Hyprland) ToggleGroup(id string) error {
-	_, err := h.dispatch("dispatch togglegroup")
+	_, err := h.dispatchVersioned("togglegroup", "hl.dsp.group.toggle()")
 	return err
 }
 
@@ -226,7 +385,14 @@ func (h *Hyprland) GroupNav(direction string) error {
 	if direction == "l" || direction == "u" || direction == "b" {
 		dir = "b"
 	}
-	_, err := h.dispatch(fmt.Sprintf("dispatch changegroupactive %s", dir))
+	luaDir := "next"
+	if dir == "b" {
+		luaDir = "prev"
+	}
+	_, err := h.dispatchVersioned(
+		fmt.Sprintf("changegroupactive %s", dir),
+		fmt.Sprintf("hl.dsp.group.%s()", luaDir),
+	)
 	return err
 }
 
@@ -300,16 +466,19 @@ func (h *Hyprland) ActiveWorkspace() (*ipc.Workspace, error) {
 }
 
 func (h *Hyprland) SwitchWorkspace(id string) error {
-	_, err := h.dispatch(fmt.Sprintf("dispatch hl.dsp.focus({ workspace = %q })", id))
+	_, err := h.dispatchVersioned(
+		fmt.Sprintf("workspace %s", id),
+		fmt.Sprintf("hl.dsp.focus({ workspace = %q })", id),
+	)
 	return err
 }
 
 func (h *Hyprland) MoveToWorkspace(windowID, workspaceID string) error {
-	target := "address:" + windowID
-	if windowID == "" {
-		target = ""
-	}
-	_, err := h.dispatch(fmt.Sprintf("dispatch movetoworkspace %s,%s", workspaceID, target))
+	target := hyprTarget(windowID)
+	_, err := h.dispatchVersioned(
+		fmt.Sprintf("movetoworkspace %s,%s", workspaceID, target),
+		fmt.Sprintf("hl.dsp.window.move({ workspace = %q%s })", workspaceID, luaTargetField(windowID)),
+	)
 	return err
 }
 
@@ -362,16 +531,19 @@ func (h *Hyprland) ListMonitors() ([]ipc.Monitor, error) {
 }
 
 func (h *Hyprland) FocusMonitor(id string) error {
-	_, err := h.dispatch(fmt.Sprintf("dispatch focusmonitor %s", id))
+	_, err := h.dispatchVersioned(
+		fmt.Sprintf("focusmonitor %s", id),
+		fmt.Sprintf("hl.dsp.focus({ monitor = %q })", id),
+	)
 	return err
 }
 
 func (h *Hyprland) MoveToMonitor(windowID, monitorID string) error {
-	target := "address:" + windowID
-	if windowID == "" {
-		target = ""
-	}
-	_, err := h.dispatch(fmt.Sprintf("dispatch movewindowmon %s,%s", monitorID, target))
+	target := hyprTarget(windowID)
+	_, err := h.dispatchVersioned(
+		fmt.Sprintf("movewindowmon %s,%s", monitorID, target),
+		fmt.Sprintf("hl.dsp.window.move({ monitor = %q%s })", monitorID, luaTargetField(windowID)),
+	)
 	return err
 }
 
@@ -381,10 +553,16 @@ func (h *Hyprland) SetDpms(monitorID string, on bool) error {
 		state = "on"
 	}
 	if monitorID != "" {
-		_, err := h.dispatch(fmt.Sprintf("dispatch dpms %s %s", state, monitorID))
+		_, err := h.dispatchVersioned(
+			fmt.Sprintf("dpms %s %s", state, monitorID),
+			fmt.Sprintf("hl.dsp.dpms({ action = %q, monitor = %q })", state, monitorID),
+		)
 		return err
 	}
-	_, err := h.dispatch(fmt.Sprintf("dispatch dpms %s", state))
+	_, err := h.dispatchVersioned(
+		fmt.Sprintf("dpms %s", state),
+		fmt.Sprintf("hl.dsp.dpms({ action = %q })", state),
+	)
 	return err
 }
 
@@ -394,25 +572,28 @@ func (h *Hyprland) SetLayout(name string) error {
 }
 
 func (h *Hyprland) MoveWindowPixel(id string, x, y int) error {
-	target := "address:" + id
-	if id == "" {
-		target = ""
-	}
-	_, err := h.dispatch(fmt.Sprintf("dispatch movewindowpixel exact %d %d,%s", x, y, target))
+	target := hyprTarget(id)
+	_, err := h.dispatchVersioned(
+		fmt.Sprintf("movewindowpixel exact %d %d,%s", x, y, target),
+		fmt.Sprintf("hl.dsp.window.move({ x = %d, y = %d%s })", x, y, luaTargetField(id)),
+	)
 	return err
 }
 
 func (h *Hyprland) MoveToWorkspaceSilent(windowID, workspaceID string) error {
-	target := "address:" + windowID
-	if windowID == "" {
-		target = ""
-	}
-	_, err := h.dispatch(fmt.Sprintf("dispatch movetoworkspacesilent %s,%s", workspaceID, target))
+	target := hyprTarget(windowID)
+	_, err := h.dispatchVersioned(
+		fmt.Sprintf("movetoworkspacesilent %s,%s", workspaceID, target),
+		fmt.Sprintf("hl.dsp.window.move({ workspace = %q, follow = false%s })", workspaceID, luaTargetField(windowID)),
+	)
 	return err
 }
 
 func (h *Hyprland) ToggleSpecialWorkspace(name string) error {
-	_, err := h.dispatch(fmt.Sprintf("dispatch hl.dsp.workspace.toggle_special(%q)", name))
+	_, err := h.dispatchVersioned(
+		fmt.Sprintf("togglespecialworkspace %s", name),
+		fmt.Sprintf("hl.dsp.workspace.toggle_special(%q)", name),
+	)
 	return err
 }
 
@@ -562,12 +743,15 @@ func (h *Hyprland) ReloadConfig() error {
 }
 
 func (h *Hyprland) Execute(command string) error {
-	_, err := h.dispatch(fmt.Sprintf("dispatch exec %s", command))
+	_, err := h.dispatchVersioned(
+		fmt.Sprintf("exec %s", command),
+		fmt.Sprintf("hl.dsp.exec_cmd(%q)", command),
+	)
 	return err
 }
 
 func (h *Hyprland) Exit() error {
-	_, err := h.dispatch("dispatch exit")
+	_, err := h.dispatchVersioned("exit", "hl.dsp.exit()")
 	return err
 }
 
